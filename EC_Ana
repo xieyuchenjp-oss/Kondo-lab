@@ -1,0 +1,155 @@
+print("=== Horizontal merge of multiple mpt/Excel files (two columns per file) ===")
+
+import pandas as pd
+from pathlib import Path
+
+# ==================【CONFIGURABLE SECTION】==================
+
+# File types to process (placed in the same folder as this script)
+TARGET_EXTS = [".mpt", ".xlsx", ".xls"]
+
+# For mpt files: original column names & base new names
+MPT_SOURCE_COLS = ["Ewe/V", "<I>/mA"]
+MPT_NEW_COLS    = ["Ewe_shifted_V", "Current_mA"]
+MPT_ADD_TO_FIRST = 1.025   # Offset added to the first column; set to 0 or None if no offset
+
+# For Excel files: original column names & base new names
+EXCEL_SOURCE_COLS = ["Ewe/V", "<I>/mA"]
+EXCEL_NEW_COLS    = ["Ewe_shifted_V", "Current_mA"]
+EXCEL_ADD_TO_FIRST = 1.025
+
+# Name of the merged output file
+MERGED_OUTPUT_NAME = "all_data_wide.xlsx"
+
+# ===========================================================
+
+
+def process_mpt(file_path: Path):
+    print(f"\n[INFO] Processing mpt: {file_path.name}")
+
+    # 1. Find the header line (the line starting with "mode")
+    header_line = None
+    with open(file_path, "r", errors="ignore") as f:
+        for i, line in enumerate(f):
+            if line.startswith("mode"):
+                header_line = i
+                break
+
+    if header_line is None:
+        print("  ⚠ Could not find a line starting with 'mode'; skipping this file.")
+        return None
+
+    # 2. Read the data
+    df = pd.read_csv(
+        file_path,
+        sep="\t",
+        skiprows=header_line,
+        header=0,
+        engine="python"
+    )
+
+    print("  Columns:", df.columns.tolist())
+
+    # 3. Check that required columns exist
+    for col in MPT_SOURCE_COLS:
+        if col not in df.columns:
+            print(f"  ⚠ Column {col} not found; skipping this file.")
+            return None
+
+    # 4. Select the specified columns
+    out = df[MPT_SOURCE_COLS].copy()
+    out.columns = MPT_NEW_COLS
+
+    # 5. Add offset to the first column if needed
+    if MPT_ADD_TO_FIRST not in (None, 0):
+        first_col = MPT_NEW_COLS[0]
+        out[first_col] = out[first_col] + MPT_ADD_TO_FIRST
+        print(f"  Added {MPT_ADD_TO_FIRST} to column {first_col}")
+
+    # 6. Reset index for clean horizontal concatenation
+    out = out.reset_index(drop=True)
+
+    # 7. Prefix column names with the file name to avoid conflicts
+    prefix = file_path.stem  # file name without extension
+    out.columns = [f"{prefix}_{col}" for col in out.columns]
+
+    return out
+
+
+def process_excel(file_path: Path):
+    print(f"\n[INFO] Processing Excel: {file_path.name}")
+
+    df = pd.read_excel(file_path, sheet_name=0)
+    print("  Columns:", df.columns.tolist())
+
+    # Check that required columns exist
+    for col in EXCEL_SOURCE_COLS:
+        if col not in df.columns:
+            print(f"  ⚠ Column {col} not found; skipping this file.")
+            return None
+
+    out = df[EXCEL_SOURCE_COLS].copy()
+    out.columns = EXCEL_NEW_COLS
+
+    if EXCEL_ADD_TO_FIRST not in (None, 0):
+        first_col = EXCEL_NEW_COLS[0]
+        out[first_col] = out[first_col] + EXCEL_ADD_TO_FIRST
+        print(f"  Added {EXCEL_ADD_TO_FIRST} to column {first_col}")
+
+    out = out.reset_index(drop=True)
+
+    prefix = file_path.stem
+    out.columns = [f"{prefix}_{col}" for col in out.columns]
+
+    return out
+
+
+def main():
+    folder = Path(__file__).parent
+    print("Current working folder:", folder)
+
+    # Find all target files
+    files = [f for f in folder.iterdir()
+             if f.is_file() and f.suffix.lower() in [ext.lower() for ext in TARGET_EXTS]]
+
+    if not files:
+        print("⚠ No .mpt / .xlsx / .xls files found.")
+        return
+
+    print(f"Found {len(files)} file(s):")
+    for f in files:
+        print(" -", f.name)
+
+    df_list = []
+
+    for f in files:
+        try:
+            if f.suffix.lower() == ".mpt":
+                out = process_mpt(f)
+            else:
+                out = process_excel(f)
+
+            if out is not None:
+                df_list.append(out)
+        except Exception as e:
+            print(f"  ❌ Error while processing {f.name}: {repr(e)}")
+
+    if not df_list:
+        print("⚠ No files were successfully processed; merged table not created.")
+        return
+
+    # Horizontal merge: align by row index, place each file's two columns side by side
+    all_df = pd.concat(df_list, axis=1)
+
+    out_file = folder / MERGED_OUTPUT_NAME
+    all_df.to_excel(out_file, index=False)
+    print(f"\n✅ Merged wide table created: {out_file.name}")
+
+
+if __name__ == "__main__":
+    try:
+        main()
+    except Exception as e:
+        print("❌ Script error:", repr(e))
+
+    input("\nPress Enter to close...")
