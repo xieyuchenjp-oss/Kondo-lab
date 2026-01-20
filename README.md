@@ -11,8 +11,10 @@ Here’s a short step-by-step guide for general users:
    ```bash
    pip install pandas openpyxl
    ```
+   or
+   python -m pip install -U pip
 
-3. Save the script as **`merge_mpt_excel_gui.pyw`**.
+4. Save the script as **`merge_mpt_excel_gui.pyw`**.
 
 ---
 
